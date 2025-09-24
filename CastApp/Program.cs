@@ -11,10 +11,6 @@
             
             //Inicializar o Natives
             Natives natives = new Natives();
-
-            //Apenas para Teste podem tirar se quiserem
-            string key = natives.TeclaPrecionada(2);
-            Console.WriteLine($"Teste: {key}");
         }
     }
 }
