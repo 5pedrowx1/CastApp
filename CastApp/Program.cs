@@ -11,6 +11,20 @@ namespace CastApp
             // Tmb ter em atencao tornar o codigo legivel e sempre que possivel comentar para que os outros possam entender e trabalhar em conjunto
             // criei uma class chamada Natives para ser usada ja tem mais comentarios para vcs 
             Start();
+
+            //tentativa de criar um ficheiro
+            string pasta = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (!Directory.Exists(pasta))
+            {
+                Directory.CreateDirectory(pasta);
+            };
+
+            string ver = (pasta + @"\Tecla");
+            if (!File.Exists(ver))
+            {
+                using (StreamWriter sw = File.CreateText(ver))
+                { }
+            }
         }
 
         protected static void Start()
