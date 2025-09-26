@@ -16,6 +16,9 @@ namespace CastApp
         [DllImport("user32.dll")]
         public static extern int GetAsyncKeyState(Int32 i);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool FreeConsole();
+
 
         #region TeclaPrecionada Nao sera mais usado por agr mas fica aqui para o futuro
         /// <summary>
