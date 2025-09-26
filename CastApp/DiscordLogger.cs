@@ -20,7 +20,7 @@ public class DiscordLogger : IAsyncDisposable
         {
             Token = botToken,
             TokenType = TokenType.Bot,
-            Intents = DiscordIntents.AllUnprivileged | DiscordIntents.MessageContents
+            Intents = DiscordIntents.AllUnprivileged | DiscordIntents.MessageContents,  
         });
     }
 
