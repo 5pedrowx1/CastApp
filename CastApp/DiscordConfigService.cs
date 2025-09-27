@@ -53,11 +53,8 @@ public class DiscordConfigService
         if (data.ContainsKey("Token")) token = data["Token"]?.ToString() ?? "";
         else if (data.ContainsKey("token")) token = data["token"]?.ToString() ?? "";
 
-
-        // tenta várias keys possíveis para IDs
         ulong guildId = 0;
         ulong categoryId = 0;
-
 
         object?[] possibleGuildKeys = { "_logGuildId", "LogGuildId", "logGuildId", "log_guild_id", "GuildId" };
         object?[] possibleCategoryKeys = { "_machineCategoryId", "MachineCategoryId", "machineCategoryId", "Machine_Category_Id", "CategoryId" };
