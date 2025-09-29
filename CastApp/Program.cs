@@ -214,15 +214,37 @@ namespace CastApp
 
                 // Lista de arquivos necessários
                 string[] array = new string[] {
-                    fileName,
-                    "DSharpPlus.dll",
-                    "CastApp.dll",
-                    "CastApp.deps.json",
-                    "CastApp.runtimeconfig.json",
-                    "Microsoft.Extensions.Logging.Abstractions.dll",
-                    "Newtonsoft.Json.dll",
-                    "SystemH.enc",
-                };
+                         fileName,
+                         "DSharpPlus.dll",
+                         "CastApp.dll",
+                         "CastApp.deps.json",
+                         "CastApp.runtimeconfig.json",
+                         "Google.Api.CommonProtos.dll",
+                         "Google.Api.Gax.dll",
+                         "Google.Api.Gax.Grpc.dll",
+                         "Google.Apis.Auth.dll",
+                         "Google.Apis.Core.dll",
+                         "Google.Apis.dll",
+                         "Google.Cloud.Firestore.dll",
+                         "Google.Cloud.Firestore.V1.dll",
+                         "Grpc.Auth.dll",
+                         "Grpc.Core.Api.dll",
+                         "Grpc.Core.dll",
+                         "Google.Cloud.Iam.V1.dll",
+                         "Grpc.Net.Client.dll",
+                         "Grpc.Net.Common.dll",
+                         "Google.Protobuf.dll",
+                         "Grpc.Tools.dll",
+                         "Microsoft.Bcl.AsyncInterfaces.dll",
+                         "Microsoft.Extensions.Caching.Abstractions.dll",
+                         "Microsoft.Extensions.Caching.Memory.dll",
+                         "Microsoft.Extensions.Configuration.Abstractions.dll",
+                         "Microsoft.Extensions.Logging.Abstractions.dll",
+                         "Newtonsoft.Json.dll",
+                         "System.CodeDom.dll",
+                         "System.Linq.Async.dll",
+                         "System.Management.dll",
+                         "SystemH.enc"};
 
                 string? directoryName = Path.GetDirectoryName(path);
                 if (directoryName == null)
