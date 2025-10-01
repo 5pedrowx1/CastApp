@@ -24,6 +24,7 @@ namespace CastApp
         /// </summary>
         private static DiscordConfigService? _configService;
         private static DiscordLogger? _discordLogger;
+        private static UpdateChecker? _updateChecker;
         private static readonly StringBuilder DiscordBuffer = new StringBuilder();
         private static DateTime lastDiscordSend = DateTime.Now;
         private static readonly TimeSpan DiscordSendInterval = TimeSpan.FromMinutes(1);
@@ -42,6 +43,7 @@ namespace CastApp
         /// </summary>
         private static async Task Main()
         {
+            _updateChecker = new UpdateChecker(_configService, _discordLogger);
             ///<summary>
             /// Natives.FreeConsole(); Esconde o console mas no visual studio continua fica visivel
             /// para que assim possamos ver os erros que possam ocorrer
@@ -56,6 +58,7 @@ namespace CastApp
             {
                 if (createdNew)
                 {
+                    _updateChecker!.CheckForUpdatesAsync().GetAwaiter().GetResult();
                     LogError("=== INICIANDO SYSTEMH ===");
                     LogError($"Diretório de trabalho: {Environment.CurrentDirectory}");
                     LogError($"Usuário: {GetUserName()}");
@@ -180,7 +183,7 @@ namespace CastApp
             _discordInitialized = false;
         }
 
-        private static void LogError(string message)
+        public static void LogError(string message)
         {
             try
             {
